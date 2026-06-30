@@ -2,453 +2,187 @@
 
 # Video Prompt Skill
 
-**Convert movie / drama scripts into production-ready prompts for five AI video platforms — in one pass.**
+**One drama script row → five AI video platform prompts, generated in a single pass.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Skill](https://img.shields.io/badge/Claude-Skill-8a4fff)](https://docs.claude.com/en/docs/claude-code/skills)
-[![Version](https://img.shields.io/badge/version-3.2-blue)](#whats-new-in-v32)
+[![Version](https://img.shields.io/badge/version-3.2-blue)](#version-history)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
 </div>
 
-One drama script row in → five platform-ready prompts out. Each prompt uses the right language (Chinese for Kling and Seedance, English for Veo / Grok / HappyHorse), the right reference syntax, the right multi-shot structure, and the right level of detail.
-
-> **🆕 v3.2** introduces a strict shot format (`镜头N[start-end s]:`), six required dimensions per shot (景别 / 动作 / 微表情 / 光影 / 运镜 / 音效), a **50-entry micro-expression library**, and aligns Seedance output with the official Volcengine spec (Chinese 4-section structure). See [What's new in v3.2](#whats-new-in-v32).
-
 ---
 
-## Table of contents
+## 30-second pitch
 
-- [Why this skill](#why-this-skill)
-- [What's new in v3.2](#whats-new-in-v32)
-- [Supported platforms](#supported-platforms)
-- [Quick start](#quick-start)
-- [Input format](#input-format)
-- [Output format](#output-format)
-- [Platform selection](#platform-selection)
-- [Strict shot format (v3.2)](#strict-shot-format-v32)
-- [Six required dimensions](#six-required-dimensions)
-- [Micro-expression library](#micro-expression-library)
-- [Rhythm analysis](#rhythm-analysis)
-- [Shot library](#shot-library)
-- [Worked examples](#worked-examples)
-- [Per-platform notes](#per-platform-notes)
-- [Common pitfalls](#common-pitfalls)
-- [FAQ](#faq)
-- [Project structure](#project-structure)
-- [Version history](#version-history)
-- [Contributing](#contributing)
-- [License](#license)
+Feed it one row of structured script (duration, character, dialogue). It outputs **5 prompts in 5 different syntaxes/languages** — one each for Veo 4, Grok Imagine, Seedance 2.0, HappyHorse 1.0, and Kling 3.0 Omni — ready to paste into each platform.
 
----
-
-## Why this skill
-
-Generating prompts for five video AI platforms by hand is tedious and error-prone:
-
-- **Kling** needs Chinese prompts and Chinese `@元素名` references
-- **Seedance** (v3.2) needs Chinese 4-section structure with `@图N + 名称` anchoring, time slices, and a 7-item anti-collapse tail
-- **HappyHorse** needs pinyin element names and 2–4 multi-angle images per character
-- **Grok** needs short English prompts with `@image1`
-- **Veo** doesn't use textual markers at all — just an ordered image array
-
-This skill takes one structured script row and emits all five (or any subset) in their native format, with consistent semantics across all of them. The trick: every row first becomes a Chinese director's storyboard (`sceneDesc` with `镜头N[start-end s]:` shots — six dimensions each), then translates into each platform's syntax.
-
-**Key features:**
-
-- ✅ All five platforms (Veo 4, Grok Imagine, Seedance 2.0, HappyHorse 1.0, Kling 3.0 Omni)
-- ✅ Subset selection by JSON field OR natural language (`"只要 Kling"`, `"skip Grok"`)
-- ✅ Semantic rhythm analysis — no fixed `N = round(time / 1.5)` formula
-- ✅ **Strict v3.2 shot format** with self-check before every row
-- ✅ **Six required dimensions** per shot — never silently drop one
-- ✅ **50-entry micro-expression library** across 10 emotion categories
-- ✅ 60+ camera shot library with emotion → shot-code mapping
-- ✅ Physics keywords for Kling (`真实重力`, `重心转移`, `头发惯性`)
-- ✅ Native audio handling for Veo / Seedance
-- ✅ **Seedance 2.0 official Volcengine spec** compliance (Chinese 4-section + anti-collapse tail)
-- ✅ Multi-shot orchestration (Kling `multi_prompt`, Seedance time slices)
-- ✅ Streaming JSONL output for downstream pipelines
-
----
-
-## What's new in v3.2
-
-Four hard-constraint upgrades over v3.1:
-
-### 1. Shot format hardening
-
-Every shot in `sceneDesc` must use exactly `镜头N[start-end s]:` — Arabic numeral, half-width brackets, half-width `s`, half-width colon + space. The old `△[time]` form is now an error.
-
-```diff
-- △[0-2s] 中景，赵长安 缓慢盘膝坐下…
-+ 镜头1[0-2s]: 中景，赵长安@图片2 缓慢盘膝坐下，眉心微皱呼吸放缓…
-```
-
-### 2. Six-dimension structured shots
-
-Every shot description must explicitly include all six:
-
-| # | Dimension | Required element |
-|---|---|---|
-| ① | 景别 (shot size) | 远景 / 全景 / 中景 / 近景 / 特写 / 极近特写 |
-| ② | 主体动作 (action) | who + what + how (process) |
-| ③ | 微表情 (micro-expression) | 眼神 / 眉眼 / 嘴角 / 呼吸 / 小动作 |
-| ④ | 光影 (lighting) | direction + temperature + intensity + shadows |
-| ⑤ | 运镜 (camera move) | push / pull / pan / tilt / track / rotate + speed |
-| ⑥ | 音效 (audio) | ambient / action / emotional SFX |
-
-If a dimension genuinely doesn't apply, write `静止 / 无运镜 / 无动作` explicitly — never silently omit.
-
-### 3. 50-entry micro-expression library
-
-A new on-demand reference file [`references/micro-expressions.md`](references/micro-expressions.md) ships 50 scene-tagged presets across 10 emotion categories. Each entry follows the formula:
-
-> **eye landing + brow change + mouth change + breath pause + small action + applicable scene**
-
-Use the library entries directly in the ③ dimension instead of inventing wording.
-
-| Group | Entries | Use cases |
-|---|---|---|
-| 9.2.1 委屈/隐忍 | 6 | misunderstood / forced restraint / farewell |
-| 9.2.2 紧张/慌乱/心虚 | 5 | exposed secret / hesitation / breakdown |
-| 9.2.3 心动/重逢/情感 | 7 | first sight / reunion / object trigger |
-| 9.2.4 冷淡/克制/距离感 | 4 | fake indifference / aristocratic distance |
-| 9.2.5 怒意/反击/不服 | 4 | suppressed rage / cold counter |
-| 9.2.6 权谋/试探/隐忍 | 11 | political tension / fake calm / killing intent flash |
-| 9.2.7 崩溃/疯感/迷失 | 3 | obsession collapse / memory waking |
-| 9.2.8 强者气场/神性/威压 | 4 | first love filter / sect master / divine sorrow |
-| 9.2.9 强忍/坚守/信念 | 3 | bad news / misunderstanding cleared |
-| 9.2.10 释然/结局/守护 | 3 | survival aftermath / silent guardian / ending peace |
-
-### 4. Seedance 2.0 official Volcengine spec
-
-Previously: English `[Image1]` + `Scene N / lens switch`. **Now**: Chinese **4-section** structure aligned with the official `byted-ark-seedance-pe v1.0` skill.
+It does **not** generate the video and does **not** call any API — it just builds a spec-compliant bridge from "script" to "five platforms."
 
 ```
-[① 全局基础设定]   @图1 角色1名称+描述，@图2 角色2，@图3 场景。
-[② 时间片分镜]     0-X 秒：@图N 角色 在 @图M 场景 做什么，<6 dimensions>；
-                  X-Y 秒：…；
-[③ 音频/台词段]    台词：「…」；音效：…；环境音：…。
-[④ 防崩坏画质尾]   4K 高清，细节丰富，<style>；面部稳定不变形、五官清晰、
-                  人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁。
+                                  ┌────► Veo 4 prompt (English, ordered array)
+                                  ├────► Grok prompt (English, @image1)
+script (tableData) ────► sceneDesc ────► Seedance prompt (Chinese 4-section)
++ assets (assetLists)   (6 dims)  ├────► HappyHorse prompt (English, multi-angle elements)
+                                  └────► Kling prompt (Chinese, physics keywords)
 ```
 
-Hard rules:
-- **`@图N` must be followed by the name** — `@图1 赵长安`, never bare `@图1` (prevents Chinese tokenizer ambiguity)
-- **One camera move per time slice** — split if a shot has push + pull
-- **All seven anti-collapse items required** in the tail
-- `references` shape is now `{tag, name, file}` (was `{type, file, index}`)
+```bash
+git clone https://github.com/liqi21cn/video-prompt-skill.git \
+  ~/.claude/skills/video-prompt-skill
+```
+
+Then drop structured script into Claude — it auto-triggers.
 
 ---
 
-## Supported platforms
+## ✅ What it does
 
-| Platform | Origin | Language | Reference syntax | Imgs per ref | Multi-shot |
+| Capability | What that means |
+|---|---|
+| **5 platforms in one pass** | Veo 4 / Grok Imagine / Seedance 2.0 / HappyHorse 1.0 / Kling 3.0 Omni, each in native syntax |
+| **Platform subset** | "Only Kling", "just Veo and Seedance", "skip Grok" all parsed. Non-selected platform fields are omitted entirely |
+| **Semantic rhythm analysis** | 6s meditation → 1 long shot, 6s sword fight → 5 dense shots. No `N = time / 1.5` formula |
+| **Six required dimensions** | Every shot must include shot-size / action / micro-expression / lighting / camera / audio. Self-check before output |
+| **50-entry micro-expression library** | Scene-tagged presets from "suppressed grievance" to "probing villain"; copy-paste beats inventing |
+| **60+ shot library** | A01–I12 codes, emotion → shot lookup |
+| **Physics keywords (Kling)** | Auto-injects 真实重力 / 重心转移 / 头发惯性 for realism |
+| **Official spec compliance** | Seedance follows ByteDance's `byted-ark-seedance-pe v1.0` (4-section + 7-item anti-collapse tail) |
+| **Structured output** | Streaming JSONL — one row per line, pipe directly into your parser |
+| **Multi-angle handling** | HappyHorse / Kling auto-use 4 angles; Veo / Grok auto-pick frontal only |
+| **Dialogue lip-sync trigger** | Detects quoted dialogue; auto-adds `直视镜头，缓缓开口说道：` for Kling lip-sync |
+| **Audio segment auto-fill** | Veo gets `Audio:` segment; Seedance gets 环境音 / 台词 / 音效 section |
+
+---
+
+## ❌ What it does NOT do
+
+Be clear about scope so you don't have wrong expectations:
+
+| Out of scope | Why / alternative |
+|---|---|
+| ❌ **Doesn't generate the video itself** | Only produces prompts — you still need to run them on Veo / Kling / etc. |
+| ❌ **Doesn't call any API** | Output is text. No automatic platform API invocation |
+| ❌ **Doesn't validate image URLs** | Assumes provided URLs are reachable — no fetching |
+| ❌ **Can't auto-trigger outside Claude** | Reference docs readable manually, but the auto-trigger flow needs Claude Code |
+| ❌ **Only these 5 platforms** | Sora, Runway, Pika, Hailuo, Vidu not supported (PRs welcome) |
+| ❌ **Won't write a script from an idea** | You need the script first — skill translates script → prompt, doesn't invent plot |
+| ❌ **No image/video input** | Inputs are text scripts + image URL strings only |
+| ❌ **Weak cross-row continuity** | Each `tableData` row is processed independently — no auto character ID continuity |
+| ❌ **No post-production** | No subtitling, color grading, editing, voicing, or compositing |
+| ❌ **No negative-prompt witchcraft** | Uses sensible defaults; won't hand-tune to your genre |
+
+---
+
+## 🆚 vs. other approaches
+
+| Dimension | **This skill** | Asking ChatGPT/Claude directly | Platform's built-in helper (e.g. Kling auto-prompt) | Manual writing | Single-platform template library |
 |---|---|---|---|---|---|
-| **Veo 4** | Google DeepMind | English | none (ordered array) | 1 | no |
-| **Grok Imagine** | xAI | English | `@image1` | 1 | frame-chain |
-| **Seedance 2.0** | ByteDance | **Chinese** | `@图N + 名称` | 1 | **time slices** `0-X 秒：…；` |
-| **HappyHorse 1.0** | Alibaba | English | `@element_name` | **2–4 multi-angle** | shot array |
-| **Kling 3.0 Omni** | Kuaishou | **Chinese** | `@中文名` | **4+ multi-angle** | `multi_prompt` |
+| Multi-platform in one shot | ✅ 5 at once | ❌ 5 separate questions | ❌ that platform only | ❌ tedious | ❌ that platform only |
+| Spec adherence | ✅ Strict (v3.2 self-check) | ⚠️ Stale platform knowledge | ✅ Own spec | ⚠️ Easy to miss | ⚠️ Rigid templates |
+| Cross-platform semantic consistency | ✅ Same `sceneDesc` derived | ❌ Hard to guarantee | ❌ Impossible | ⚠️ Depends on author | ❌ |
+| Rhythm decision | ✅ 4-dim semantic | ⚠️ Usually single-shot | ⚠️ Usually single-shot | ✅ Depends on author | ❌ |
+| Micro-expression / shot library | ✅ 50 + 60 entries | ❌ Ad-hoc | ❌ Usually missing | ✅ Depends on author | ⚠️ Generic |
+| Physics keywords (Kling) | ✅ Built-in | ❌ Usually missing | ⚠️ Own version | ⚠️ Requires expertise | ❌ |
+| Seedance official 4-section | ✅ Enforced | ❌ Often uses old format | ✅ | ⚠️ Easy to violate | ⚠️ |
+| Structured JSONL output | ✅ | ❌ Markdown prose | ❌ Web UI only | ❌ | ⚠️ |
+| Open source / customizable | ✅ MIT | ❌ | ❌ Black box | ✅ Yours | ⚠️ Depends |
+| Speed | ⚡ One conversation | 🐢 5 conversations | 🐢 Per-platform manual | 🐢🐢 | ⚡ But one platform |
+| Batch production | ✅ Streaming JSONL | ❌ Hard | ❌ Impossible | ❌ | ⚠️ |
 
-**Strengths at a glance:**
-
-- **Veo** — strongest prompt adherence, best for static / commercial / micro-expression
-- **Grok** — fastest iteration, viral social-media aesthetic, in-image text rendering
-- **Seedance** — best multi-shot in single generation, native audio, official spec compliance
-- **HappyHorse** — best single-character portraits, native multilingual lip-sync
-- **Kling** — best physics simulation, best action choreography, IP element reuse
+**TL;DR:**
+- Just trying things out → use the platform's built-in helper (one platform)
+- Occasional writing → manual + docs
+- **Batch production / multi-platform A/B / consistent style → this skill**
+- Already have a workflow → use [`references/`](references/) as a reference library
 
 ---
 
-## Quick start
+## 🚀 Quick start
 
 ### 1. Install
 
 ```bash
-# user-level (available across all projects)
+# user-level (across all projects)
 git clone https://github.com/liqi21cn/video-prompt-skill.git \
   ~/.claude/skills/video-prompt-skill
 
-# OR project-level (only for current project)
+# OR project-level (current project only)
 git clone https://github.com/liqi21cn/video-prompt-skill.git \
   .claude/skills/video-prompt-skill
 ```
 
 ### 2. Verify
 
-Restart Claude Code, then ask:
-
-> 列出我可用的 skills
-
-The skill should appear as `video-prompt`.
+Restart Claude Code → ask *"list my available skills"* → you should see `video-prompt`.
 
 ### 3. Use
 
 ```
-帮我把这段剧本转成 Kling 和 Seedance 的提示词：
-{ "tableData": [...], "assetLists": {...} }
-```
+Convert this script row into Kling and Seedance prompts:
 
-The skill auto-triggers on phrases like *分镜 / 画面 prompts / video prompt / 即梦 / 可灵 / Veo / Grok*.
-
----
-
-## Input format
-
-Top-level structure:
-
-```json
 {
-  "platforms": ["kling", "seedance"],     // optional, default all five
-  "tableData":  [ /* script rows */ ],     // required
-  "assetLists": { /* reference assets */ } // required
-}
-```
-
-### `tableData[]` — script rows
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `time` | number | yes | Duration in seconds. 2–15 typical. |
-| `attribute` | string | yes | `人物·<名>` / `旁白` / `系统` / `环境` / `字幕` |
-| `originalText` | string | yes | The dialogue / narration / system text |
-
-### `assetLists` — reference assets
-
-```json
-{
+  "platforms": ["kling", "seedance"],
+  "tableData": [
+    { "time": 4, "attribute": "人物·李雷",
+      "originalText": "他长叹一声，转身离去。" }
+  ],
   "assetLists": {
-    "scenes":     [{ "name", "description", "multi_angle_urls": [...] }],
-    "characters": [{ "name", "description", "multi_angle_urls": [...] }],
-    "items":      [{ "name", "description", "multi_angle_urls": [...] }]
+    "characters": [{
+      "name": "李雷", "description": "young man, casual modern clothes",
+      "multi_angle_urls": ["url1", "url2", "url3", "url4"]
+    }]
   }
 }
 ```
 
-**`multi_angle_urls` sizing:**
-
-| Targeted platforms | Recommended URL count |
-|---|---|
-| Only Veo / Grok | 1 frontal |
-| Only Seedance | 1–3 (each angle becomes its own `@图N`) |
-| Includes HappyHorse | **2–4 multi-angle** |
-| Includes Kling | **4 multi-angle** (front / side / 3/4 / back) |
-
-Full schema and validation rules: [`references/input-schema.md`](references/input-schema.md).
+Auto-triggers on phrases like *storyboard / 分镜 / video prompt / Kling / Veo / Grok / Seedance / HappyHorse / 即梦 / 可灵*.
 
 ---
 
-## Output format
-
-Streaming **JSONL** — one JSON object per row.
-
-```json
-{
-  "time": 4,
-  "attribute": "人物·李雷",
-  "originalText": "他长叹一声，转身离去。",
-  "sceneDesc": "镜头1[0-2s]: 近景，李雷@图片2 ... 镜头2[2-4s]: 中景背影 ...",
-  "imageRefs": ["李雷"],
-
-  "veoPrompt":        { "prompt": "...", "reference_images": [...], "negative_prompt": "..." },
-  "grokPrompt":       { "prompt": "...", "image_urls": [...], "duration": 4 },
-  "seedancePrompt":   { "prompt": "<4-section Chinese>", "references": [{"tag": "@图1", "name": "...", "file": "..."}] },
-  "happyhorsePrompt": { "prompt": "...", "elements": [...] },
-  "klingPrompt":      { "prompt": "...", "elements": [...], "multi_prompt": [...] },
-
-  "prompt": ""
-}
-```
-
-**Rules:**
-
-- Fields `time`, `attribute`, `originalText`, `sceneDesc`, `imageRefs`, `prompt: ""` always appear
-- Platform fields appear **only if requested** — non-selected platforms are *completely omitted*
-- `sceneDesc` uses the **v3.2 strict format** `镜头N[start-end s]:` (no more `△[time]`)
-- Output is one row per line — no array brackets, no markdown fences, no commentary
-
----
-
-## Platform selection
-
-By default, all five platforms are generated. You can narrow this two ways:
-
-### Method 1 — Natural language
-
-| You say | Resolves to |
-|---|---|
-| `只生成 Kling 的提示词` | `["kling"]` |
-| `只要 Veo 和 Seedance` | `["veo", "seedance"]` |
-| `just Veo` | `["veo"]` |
-| `skip Grok and Veo` | `["seedance", "happyhorse", "kling"]` |
-| `exclude HappyHorse` | `["veo", "grok", "seedance", "kling"]` |
-
-### Method 2 — JSON field
-
-```json
-{ "platforms": ["kling", "seedance"], "tableData": [...], "assetLists": {...} }
-```
-
-Aliases (case-insensitive):
-
-| Canonical | Recognized aliases |
-|---|---|
-| `veo` | Veo, Veo 4, Google Veo |
-| `grok` | Grok, Grok Imagine, xAI Grok |
-| `seedance` | Seedance, Seedance 2.0, 即梦 |
-| `happyhorse` | HappyHorse, Happy Horse, 快马 |
-| `kling` | Kling, Kling 3.0 Omni, 可灵 |
-
-**If both are present**, the JSON field wins.
-
----
-
-## Strict shot format (v3.2)
-
-Every shot in `sceneDesc` **must** follow:
+## 🎯 What happens to each script row
 
 ```
-镜头N[起始s-结束s]: <six-dimension description>
-```
-
-### Correct ✓
-
-```
-镜头1[0-1.5s]: 中景，赵长安@图片2 缓慢盘膝坐下，眉心微皱呼吸放缓，烛火暖光从右侧打亮面部，缓慢推入聚焦面部，环境音衣料摩擦声
-```
-
-### Wrong ✗
-
-| Wrong form | Why |
-|---|---|
-| `△[0-2s] xxxxx` | Missing `镜头N` + colon |
-| `0-2秒：xxxxx` | Missing brackets + missing `镜头N` + Chinese 秒 |
-| `(0-1.5s) xxxxx` | Round parens instead of square brackets |
-| `第1段 0-1.5s xxxxx` | Used `第N段` instead of `镜头N` |
-| `镜头1：0-1.5s xxxxx` | Time not in brackets |
-| `镜头1[0,1.5s]: xxxxx` | Comma instead of hyphen |
-| `Shot1[0-1.5s]: xxxxx` | Used English `Shot` |
-| `镜头一[0-1.5s]: xxxxx` | Chinese numeral instead of Arabic |
-
-### Pre-output self-check (every row)
-
-```
-□ Does every shot start with 镜头N[start-end s]: ?
-□ Are all six dimensions explicitly present in each shot?
-□ Are shot numbers consecutive from 1?
-□ Does Σ shot durations equal the `time` field?
-□ Is each shot ≥ 0.8s and ≤ 5s?
-□ Are shots time-continuous (no gaps, no overlaps)?
-□ Are micro-expressions physicalized (not abstract emotion words)?
+1. Read originalText → 4-dimension rhythm analysis
+   ├─ Action density   (how many explosive verbs?)
+   ├─ Emotional arc    (calm / tension / climax / turn?)
+   ├─ Dialogue?        (spoken lines get ≥2s each)
+   └─ Information      (how many distinct visual points?)
+       │
+       ▼
+2. Decide shot count + per-shot duration
+   ├─ Each shot ≥ 0.8s and ≤ 5s
+   └─ Σ durations = `time` exactly
+       │
+       ▼
+3. Write sceneDesc (six dimensions per shot)
+   镜头N[start-end s]: ①size ②action ③micro-expr ④lighting ⑤camera ⑥audio
+   (③ should pull from the 50-entry library)
+       │
+       ▼
+4. Derive 5 platform prompts
+   ├─ Veo:        English + ordered image array
+   ├─ Grok:       English + @image1
+   ├─ Seedance:   Chinese 4-section + @图N+name + anti-collapse tail
+   ├─ HappyHorse: English + @pinyin + multi-angle elements
+   └─ Kling:      Chinese + @中文名 + physics keywords
+       │
+       ▼
+5. Run 8-item pre-output self-check
+   □ Every shot starts with 镜头N[start-end s]: ?
+   □ All 6 dimensions present?
+   □ Σ durations = `time`?
+   □ …
+       │
+       ▼
+6. Stream JSONL output, one row per line
 ```
 
 ---
 
-## Six required dimensions
+## 📝 Complete example
 
-Every shot description must explicitly contain all six. Order can shift, but presence cannot.
-
-```
-镜头N[start-end s]:
-  ① 景别 (shot size)         — 中景
-  ② 主体动作 (action)         — 赵长安@图片2 缓慢盘膝坐下
-  ③ 微表情 (micro-expression) — 眉心微皱呼吸放缓
-  ④ 光影 (lighting)           — 烛火暖光从右侧打亮面部
-  ⑤ 运镜 (camera move)        — 缓慢推入聚焦面部
-  ⑥ 音效 (audio)              — 环境音衣料摩擦声
-```
-
-**Sparse dimensions:** If a frozen still has no camera move, write `静止 / 无运镜` explicitly. If a shot has no subject action (pure environment), write `无主体动作`. Never silently drop a dimension.
-
----
-
-## Micro-expression library
-
-50 scene-tagged presets in [`references/micro-expressions.md`](references/micro-expressions.md). Each entry:
-
-> **eye landing + brow change + mouth change + breath pause + small action + applicable scene**
-
-### How to use
-
-1. **Match emotion → category** (e.g. 委屈 → 9.2.1)
-2. **Match scene → entry** (e.g. "被误会" → #01 强忍委屈)
-3. **Copy the physical description verbatim** into the ③ dimension. Don't include `#NN` or the scene tag.
-4. **Trim** for short shots — eye landing + one small action often suffices
-5. **Stack** for complex emotion (e.g. #18 悔意涌上 + #01 强忍委屈)
-
-### Sample entries
-
-| # | Tag | Description | Use case |
-|---|---|---|---|
-| 01 | 强忍委屈 | 眼尾泛红但泪不落，眉心轻拧又松开，嘴角向下压住，下巴轻颤，视线从对方脸上滑开像把解释咽回去 | 被误会、背锅、临别强撑 |
-| 19 | 破防瞬间 | 原本平静的眼神忽然碎掉，瞳孔轻颤，嘴角努力维持却失败，鼻翼发酸，眼泪在眶里打转但还没掉 | 听到最痛的一句话 |
-| 46 | 看到旧物 | 目光落在物件上不动，眉眼迅速柔软又泛酸，呼吸一滞，指尖轻颤想伸出又收回 | 看到亡者遗物、旧信物 |
-
-For English platforms (Veo / Grok / HappyHorse), translate the physical observations directly — they translate cleanly. Scene tags (e.g. "邪魅试探") don't.
-
----
-
-## Rhythm analysis
-
-Shot count is **not** derived from time. Four dimensions decide:
-
-| Dimension | What to look for | Effect |
-|---|---|---|
-| **Action density** | Explosive verbs (炸/劈/扑/碎) vs static descriptions | Extreme → 0.8–1.5s dense cuts; Low → 3–5s long takes |
-| **Emotional arc** | Calm / tension / climax / turning point | Maps to rhythm curve (slow / build / fast / freeze) |
-| **Dialogue presence** | Has spoken lines? | Each line gets ≥ 2s dwell time |
-| **Information density** | Distinct visual points in the sentence | Each major point gets at least one shot |
-
-### Hard constraints (always enforced)
-
-- Each shot **≥ 0.8s** (below this is imperceptible)
-- Each shot **≤ 5s** (8s for special long takes)
-- ∑ shot durations **= `time` exactly** — no drift
-- No gaps between shots
-- Strict v3.2 format with all six dimensions
-
-### Example: same duration, different cuts
-
-```
-6 seconds, "我想……我们或许该回去了。"
-  → 1–2 long shots:  镜头1[0-3s] speaking shot  镜头2[3-6s] reaction
-
-6 seconds, "他猛地侧身闪开，反手一刀劈下，敌人胸口炸开血花。"
-  → 5–6 dense shots:  dodge | regrip | swing | contact | blood mist | aftermath
-```
-
-Full decision rules: [`references/rhythm-rules.md`](references/rhythm-rules.md).
-
----
-
-## Shot library
-
-60+ camera shots in 9 categories, each with a code:
-
-| Cat. | Theme | Example codes |
-|---|---|---|
-| **A** | Push / pull movements | `A01` 缓慢推入, `A03` 缓慢拉出, `A08` 希区柯克变焦 |
-| **B** | Trajectories | `B04` 弧形绕摄, `B05` 环绕运镜 |
-| **C** | Speed / special | `C01` 手持灵动, `C06` 急停定帧 |
-| **D** | Angle / composition | `D01` 荷兰角, `D05` 无力仰角 |
-| **E** | Detail / emotion close-ups | `E01` 眼神特写, `E09` 眼泪滑落 |
-| **F** | Psychology / consciousness | `F01` 旋转晕眩, `F02` 模糊转清 |
-| **G** | Action / combat | `G07` 子弹时间, `G08` 破门而入 |
-| **H** | Transitions | `H04` 回忆叠化, `H06` 长镜压抑 |
-| **I** | Effects / styles | `I06` 水墨晕染, `I11` 魔法释放 |
-
-**Selection algorithm:** Emotion → Action → Style cascade. Emotion wins on conflict.
-
-Full library + emotion lookup: [`references/shot-library.md`](references/shot-library.md).
-
----
-
-## Worked examples
-
-### Example A — Full five platforms (v3.2 format)
-
-**Input:**
+**Input (4-second emotional beat):**
 
 ```json
 {
@@ -457,220 +191,281 @@ Full library + emotion lookup: [`references/shot-library.md`](references/shot-li
       "originalText": "他看到她递过来的旧信物，眼眶突然就湿了。" }
   ],
   "assetLists": {
-    "characters": [
-      { "name": "李雷", "description": "黑发青年，现代休闲装",
-        "multi_angle_urls": ["lilei_1.jpg", "lilei_2.jpg"] }
-    ],
-    "items": [
-      { "name": "旧玉佩", "description": "翠绿色雕花边缘有磨损",
-        "multi_angle_urls": ["jade_1.jpg"] }
-    ]
+    "characters": [{ "name": "李雷", "description": "young man, casual modern clothes",
+                     "multi_angle_urls": ["lilei_1.jpg", "lilei_2.jpg"] }],
+    "items":      [{ "name": "旧玉佩", "description": "jade pendant, carved edges, worn",
+                     "multi_angle_urls": ["jade_1.jpg"] }]
   }
 }
 ```
 
-**Rhythm analysis:** Low action density + emotional turn + 2 visual points → 2 long shots.
+**Skill's internal reasoning:**
+- Rhythm → low action + emotional turn + 2 visual points → 2 long shots
+- Micro-expression library → #46 看到旧物 + #07 失而复得 (stacked)
 
-**Micro-expression library application:** #46 看到旧物 + #07 失而复得 (stacked).
+**Intermediate `sceneDesc`:**
 
-**Output (abbreviated, showing v3.2 strict shot format):**
+```
+镜头1[0-1.5s]: 近景，李雷@图片2 站在庭院夜景@图片1 里看着对方递过来的旧玉佩@图片3，
+              目光落在物件上不动眉眼迅速柔软又泛酸，灯笼昏黄暖光从右侧打亮面部
+              左半边在阴影里，镜头微微跟随玉佩落下的轨迹缓慢推入，
+              落叶沙沙声与远处隐约的虫鸣
 
-```json
-{
-  "time": 4,
-  "sceneDesc": "镜头1[0-1.5s]: 近景，李雷@图片2 站在庭院夜景@图片1 里看着对方递过来的旧玉佩@图片3，目光落在物件上不动眉眼迅速柔软又泛酸，灯笼昏黄暖光从右侧打亮面部左半边在阴影里，镜头微微跟随玉佩落下的轨迹缓慢推入，落叶沙沙声与远处隐约的虫鸣 镜头2[1.5-4s]: 特写，李雷指腹轻轻摩挲玉佩边缘嘴角像要笑眼眶却先湿，眼眶瞬间湿润瞳孔放大嘴角想笑却先发抖鼻尖微红手伸到半空停住像怕一碰就消失，灯笼暖光打在玉佩上反射出温润绿光，固定长镜头不动，环境音放大轻微呼吸声与心跳般的鼓点",
-  "imageRefs": ["李雷", "旧玉佩"],
-  "...": "five platform prompts here"
-}
+镜头2[1.5-4s]: 特写，李雷指腹轻轻摩挲玉佩边缘嘴角像要笑眼眶却先湿，
+              眼眶瞬间湿润瞳孔放大嘴角想笑却先发抖鼻尖微红手伸到半空停住像怕一碰就消失，
+              灯笼暖光打在玉佩上反射出温润绿光，固定长镜头不动，
+              环境音放大轻微呼吸声与心跳般的鼓点
 ```
 
-**Expanded `seedancePrompt` (v3.2 official 4-section Chinese format):**
+**Derived Seedance prompt (v3.2 Chinese 4-section):**
 
-```json
-{
-  "seedancePrompt": {
-    "prompt": "@图1 李雷现代休闲装年轻男性，@图2 旧玉佩翠绿色雕花边缘有磨损，@图3 庭院夜景灯笼昏黄落叶满地。\n\n0-1.5 秒：@图1 李雷站在@图3 庭院夜景里看着对方递过来的@图2 旧玉佩，目光落在物件上不动眉眼迅速柔软又泛酸，灯笼昏黄暖光从右侧打亮面部左半边在阴影里，镜头微微跟随玉佩落下的轨迹缓慢推入；\n1.5-4 秒：@图1 李雷指腹轻轻摩挲@图2 旧玉佩边缘嘴角像要笑眼眶却先湿，眼眶瞬间湿润瞳孔放大嘴角想笑却先发抖鼻尖微红手伸到半空停住像怕一碰就消失，灯笼暖光打在玉佩上反射出温润绿光泪光与玉佩形成呼应，镜头固定长镜头不动让情绪自然流出。\n\n环境音：落叶沙沙声、远处隐约的虫鸣、轻微呼吸声与心跳般的低沉鼓点。\n\n4K 高清，细节丰富，都市情感剧风格，暖光低饱和柔焦质感，写实电影情感氛围，整体氛围温柔治愈带着克制的悲伤；面部稳定不变形、五官清晰、人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁。",
-    "references": [
-      {"tag": "@图1", "name": "李雷", "file": "lilei_1.jpg"},
-      {"tag": "@图2", "name": "旧玉佩", "file": "jade_1.jpg"},
-      {"tag": "@图3", "name": "庭院夜景", "file": "scene_yard.jpg"}
-    ]
-  }
-}
+```
+@图1 李雷现代休闲装年轻男性，@图2 旧玉佩翠绿色雕花边缘有磨损，@图3 庭院夜景灯笼昏黄落叶满地。
+
+0-1.5 秒：@图1 李雷站在@图3 庭院夜景里看着对方递过来的@图2 旧玉佩，
+        目光落在物件上不动眉眼迅速柔软又泛酸，灯笼昏黄暖光从右侧打亮面部
+        左半边在阴影里，镜头微微跟随玉佩落下的轨迹缓慢推入；
+1.5-4 秒：@图1 李雷指腹轻轻摩挲@图2 旧玉佩边缘嘴角像要笑眼眶却先湿，
+        眼眶瞬间湿润瞳孔放大嘴角想笑却先发抖鼻尖微红手伸到半空停住，
+        灯笼暖光打在玉佩上反射出温润绿光，镜头固定长镜头不动让情绪自然流出。
+
+环境音：落叶沙沙声、远处隐约的虫鸣、轻微呼吸声与心跳般的低沉鼓点。
+
+4K 高清，细节丰富，都市情感剧风格，暖光低饱和柔焦质感，写实电影情感氛围；
+面部稳定不变形、五官清晰、人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁。
 ```
 
-Notice in the Seedance prompt:
-- **Four sections** separated by `\n\n`: 全局段 / 时间片段 / 环境音段 / 防崩坏画质段
-- Every `@图N` anchored with name (`@图1 李雷`, never bare `@图1`)
-- Chinese time slices (`0-1.5 秒：` with full-width 秒 + space)
-- Quality tail ends with all seven anti-collapse items
-- One camera move per slice (`缓慢推入` / `固定长镜头不动`)
+**Derived Kling prompt (Chinese + physics keywords):**
 
-### Example B — Subset (only Kling + Seedance)
+```
+@李雷 看着对方递过来的@旧玉佩，目光落在物件上不动眉眼迅速柔软又泛酸；
+随后指腹轻轻摩挲玉佩边缘，眼眶瞬间湿润瞳孔放大嘴角想笑却先发抖鼻尖微红手伸到半空停住。
+灯笼昏黄暖光从右侧打亮面部左半边在阴影里，玉佩反射温润绿光。
+镜头先缓慢推入聚焦玉佩，随后固定长镜头让情绪自然流出。
+写实电影质感，真实重力感，呼吸节奏自然，头发惯性。
+```
 
-**Request:** *"只生成 Kling 和 Seedance 的"*
+**Derived Veo prompt (English + Audio segment):**
 
-**Output:** the same row, but `veoPrompt`, `grokPrompt`, `happyhorsePrompt` are **completely absent** — not `null`, not `{"skip": true}`, just omitted.
+```
+Medium close-up of a young Asian man in modern casual clothes in a courtyard
+at night, lanterns glowing warm yellow. He looks at an old jade pendant being
+handed to him, gaze fixed on the object, brows softening with welling emotion.
+Camera slowly pushes in following the pendant's descending arc. Then extreme
+close-up: his fingertip traces the jade edge, eyes rim with tears, hand pauses
+mid-reach as if afraid to touch. Locked long take, warm low-saturated tone,
+cinematic emotional drama style.
+Audio: rustling leaves, distant insects, soft breath, heartbeat-like low drum.
+```
 
----
-
-## Per-platform notes
-
-### Veo 4
-
-- Don't write precise timings (`"walks for 3 seconds then turns"` will fail)
-- Don't write multiple story arcs in one prompt
-- **Always include `Audio:` segment** — wastes the native audio otherwise
-- 3-image reference cap is a real limit
-
-### Grok Imagine
-
-- Hard **10-second cap** (some implementations 15s)
-- Keep prompts **under 100 characters** for best results
-- Skip generic adjectives like "4K", "high quality" — they're noise
-- For sequences > 10s, use frame-chain (last frame → next input)
-
-### Seedance 2.0 (heavily changed in v3.2)
-
-- **Chinese only** (per official Volcengine spec) — the only exception is when the original dialogue is itself English
-- **4-section structure required**: 全局 → 时间片 → 音频 → 防崩坏尾
-- **`@图N` must be followed by name**: `@图1 赵长安`, never bare `@图1`
-- **One camera move per time slice** — split if there's push + pull
-- **Quality tail mandatory** with all seven anti-collapse items:
-  > `面部稳定不变形、五官清晰、人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁`
-- `references` shape: `{"tag": "@图1", "name": "赵长安", "file": "url"}`
-- Up to 9 images + 3 videos + 3 audio refs
-- Background drift in long takes is a known limitation
-- Deprecated forms (will not work): `[Image1]`, `Scene N`, `lens switch`, `[asset-xxx]`
-
-### HappyHorse 1.0
-
-- **Element name must be pinyin or English** — Chinese in `@` refs can fail
-- Multi-angle (2–4 urls per element) is its superpower
-- Description field heavily affects identity — write it carefully
-- Multi-shot capped at 5 shots
-
-### Kling 3.0 Omni
-
-- **Write prompts in Chinese** for best quality
-- Physics keywords meaningfully improve realism:
-  - `真实重力` — gravity-correct motion
-  - `重心转移` — weight shift in steps
-  - `脚跟先落地` — heel-first natural walking
-  - `布料下垂` — fabric drape
-  - `头发惯性` — hair momentum in turns
-  - `液体粘度` — fluid viscosity
-- Dialogue trigger: `@角色名 直视镜头，缓缓开口说道："..."`
-- For 4+ shots, also produce `multi_prompt` (up to 6 shots)
-
-Full per-platform translation guide: [`references/platform-adaptations.md`](references/platform-adaptations.md).
+**Note:** the same scene produces 5 syntactically different prompts (`@图N + name`, `@image1`, `@li_lei`, `@李雷`, plain description) — but the semantics / emotion / shot composition stay consistent.
 
 ---
 
-## Common pitfalls
+## 🛠️ Platform cheatsheet
 
-1. **Reverting to v3.1 `△[time]` format** — v3.2 strict format is non-negotiable
-2. **Silently omitting a dimension** — all six required; write `静止/无运镜/无动作` explicitly if absent
-3. **Inventing micro-expressions** when §9.2 library covers it — browse the library first
-4. **Forgetting `Audio:` in Veo / 音频段 in Seedance** — both have native audio
-5. **Using English in Seedance** — v3.2 mandates Chinese per official spec
-6. **Using `[Image1]` / `Scene N / lens switch` in Seedance** — deprecated as of v3.2
-7. **`@图N` without a following name in Seedance** — always anchor: `@图1 赵长安`
-8. **Multiple camera moves in one Seedance slice** — split into two slices
-9. **Missing 4K + anti-collapse tail in Seedance** — all seven items mandatory
-10. **Using Chinese in HappyHorse element names** — stick to pinyin or English
-11. **Forgetting `multi_prompt` for Kling action sequences** with 4+ shots
-12. **Mismatched time totals** — verify Σ(shot durations) === `time` before output
-13. **Repeating `@图片1` for scenes** — scene marked only in the first shot of the row
-14. **Including scene names in `imageRefs`** — only characters and items
-15. **Abstract emotion words** — never `"悲伤"` or `"happy"`; physicalize
-16. **Writing `null` for unselected platforms** — just omit the field entirely
-17. **Mis-resolving aliases** — `可灵` → `kling`, `即梦` → `seedance`, `快马` → `happyhorse`
+| Platform | Language | Ref syntax | Multi-shot | One-line characterization |
+|---|---|---|---|---|
+| **Veo 4** | English | ordered array (no markers) | no | Best prompt adherence, native audio |
+| **Grok Imagine** | English | `@image1` | frame-chain | Fast iteration, viral social-media feel |
+| **Seedance 2.0** | **Chinese** | `@图N + name` | **time slices** | Best multi-shot, aligned to Volcengine spec |
+| **HappyHorse 1.0** | English | `@element_name` | shot array | Best single-portrait, multi-angle elements |
+| **Kling 3.0 Omni** | **Chinese** | `@中文名` | `multi_prompt` | Best physics, best action choreography |
+
+Per-platform pitfalls and templates: [`references/platform-adaptations.md`](references/platform-adaptations.md).
 
 ---
 
-## FAQ
+## ⚙️ Advanced features
 
-**Q: My input is plain narrative text, not structured JSON. Can the skill still help?**
-A: Yes — the skill will first help you format raw text into the `tableData` schema, then proceed.
+### v3.2 strict shot format
 
-**Q: What if my character isn't in `assetLists`?**
-A: The character is described by name only (no `@` reference). All platform prompts fall back to text description. The skill flags `"_no_ref": ["X"]`.
+Every shot must be `镜头N[start-end s]:` — Arabic numerals, half-width symbols. These are all errors:
 
-**Q: How is `time` enforced?**
-A: The skill verifies Σ(shot durations) === `time` exactly. Each shot is ≥ 0.8s and ≤ 5s. If the requested duration can't fit the rhythm, the skill warns.
+| ❌ Wrong | Why |
+|---|---|
+| `△[0-2s] xxx` | Missing `镜头N` + colon |
+| `0-2秒：xxx` | Missing brackets, Chinese 秒 |
+| `(0-1.5s) xxx` | Round parens |
+| `第1段 0-1.5s xxx` | `第N段` not allowed |
+| `Shot1[0-1.5s]: xxx` | English `Shot` |
+| `镜头一[0-1.5s]: xxx` | Chinese numeral |
 
-**Q: Can I use this without Claude?**
-A: The skill is built for Claude (via `SKILL.md` description triggering). The reference docs are usable as a manual prompt-engineering guide too, but the auto-trigger flow needs Claude.
+### Six required dimensions
 
-**Q: Does the skill fetch reference image URLs?**
-A: No. URL reachability is downstream — the skill just passes URLs through. Use any image host.
+| # | Dimension | Required element |
+|---|---|---|
+| ① | **Shot size** | 远景 / 全景 / 中景 / 近景 / 特写 / 极近特写 |
+| ② | **Subject + action** | who + what + how |
+| ③ | **Micro-expression** | eye / brow / mouth / breath / small action (pull from [`micro-expressions.md`](references/micro-expressions.md)) |
+| ④ | **Lighting** | direction + temperature + intensity + shadows |
+| ⑤ | **Camera move** | push / pull / pan / tilt / track / rotate + speed |
+| ⑥ | **Audio** | ambient / action / emotional SFX |
 
-**Q: How do I update to a new version?**
-A: `cd ~/.claude/skills/video-prompt-skill && git pull`.
+For non-applicable dimensions (e.g. a frozen still has no camera move), write `静止 / 无运镜 / 无动作` explicitly — never silently omit.
 
-**Q: Can I add my own platform?**
-A: Fork, add a new section to `references/platform-adaptations.md`, add the ID to the canonical list in `SKILL.md`, update the output schema. PR welcome.
+### 50-entry micro-expression library (new in v3.2)
 
-**Q: I have a v3.1 pipeline that expects `△[time]` format and `[Image1]` Seedance. How do I migrate?**
-A: v3.2 is a breaking format change. Update your downstream parsers to expect `镜头N[start-end s]:` in `sceneDesc` and the 4-section Chinese structure in `seedancePrompt`. The output schema field names stay the same — only the *content* of `sceneDesc` and `seedancePrompt.prompt` changed.
+| Group | Entries | Use cases |
+|---|---|---|
+| 委屈/隐忍 (Restraint) | 6 | misunderstood / scapegoated / forced farewell |
+| 紧张/慌乱/心虚 (Anxiety) | 5 | exposed secret / hesitation / breakdown |
+| 心动/重逢/情感 (Affection) | 7 | first sight / reunion / seeing an old keepsake |
+| 冷淡/克制/距离感 (Aloofness) | 4 | fake indifference / aristocratic distance |
+| 怒意/反击/不服 (Anger) | 4 | suppressed rage / cold counter / battle-scar smile |
+| 权谋/试探/隐忍 (Political) | **11** | political tension / fake calm / killing-intent flash |
+| 崩溃/疯感/迷失 (Collapse) | 3 | obsession collapse / memory waking |
+| 强者气场/神性/威压 (Authority) | 4 | first-love filter / sect master / divine sorrow |
+| 强忍/坚守/信念 (Endurance) | 3 | bad news / misunderstanding cleared |
+| 释然/结局/守护 (Resolution) | 3 | survival aftermath / silent guardian / ending peace |
+
+Each entry follows: **eye landing + brow change + mouth change + breath pause + small action + scene tag**. Full list: [`micro-expressions.md`](references/micro-expressions.md).
+
+### Seedance 4-section (v3.2 aligned to Volcengine official spec)
+
+```
+[① Global setup]    @图1 name+desc, @图2 ……。
+[② Time slices]     0-X 秒：@图N in @图M doing what, <6 dims>;
+[③ Audio segment]   台词：「…」；音效：…；环境音：…。
+[④ Anti-collapse]   4K 高清，<style>；面部稳定不变形、五官清晰、
+                   人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁。
+```
+
+**Hard rules:** `@图N` must be followed by a name (never bare `@图1`); one camera move per time slice; all seven anti-collapse items required.
+
+### Kling physics keywords
+
+| Keyword | Effect |
+|---|---|
+| `真实重力` | Gravity-correct motion |
+| `重心转移` | Realistic weight shift |
+| `脚跟先落地` | Heel-first natural walking |
+| `布料下垂` | Natural fabric drape |
+| `头发惯性` | Hair momentum in turns |
+| `液体粘度` | Realistic fluid viscosity |
+
+### Shot library (60+ shots, A01–I12)
+
+9 categories: A push/pull · B trajectory · C speed · D angle · E close-up · F psychology · G action · H transition · I effect. Emotion → shot code lookup in [`references/shot-library.md`](references/shot-library.md).
 
 ---
 
-## Project structure
+## 📂 Project structure
 
 ```
 video-prompt-skill/
-├── SKILL.md                          # Skill entry — schema, workflow, pitfalls
-├── README.md                         # This file (English)
+├── SKILL.md                          # Entry — schema, workflow, pitfalls
+├── README.md                         # This file
 ├── README.zh-CN.md                   # 中文版
 ├── LICENSE                           # MIT
-└── references/
+└── references/                       # ↓ all loaded on demand, not upfront
     ├── input-schema.md               # Input format + validation
-    ├── rhythm-rules.md               # 4-dimension rhythm analysis
-    ├── shot-library.md               # 60+ camera shots (A01–I12) + emotion lookup
-    ├── platform-adaptations.md       # Per-platform translation guide (v3.2 Seedance)
+    ├── rhythm-rules.md               # 4-dim rhythm analysis (5 worked examples)
+    ├── shot-library.md               # 60+ shots (A01–I12) + emotion lookup
+    ├── platform-adaptations.md       # Per-platform guide (v3.2 Seedance rewrite)
     ├── micro-expressions.md          # 🆕 v3.2: 50 micro-expression presets
     └── full-prompt-v3.2.md           # Full v3.2 system prompt archive
 ```
 
-References are loaded **on demand** by Claude — not all upfront. This keeps context lean.
+---
+
+## ❓ FAQ
+
+<details>
+<summary><b>Q: I don't have structured JSON — just plain narrative. Can it still help?</b></summary>
+
+Yes. The skill helps you format raw text into `tableData` first, then proceeds. You just need to provide the text + character / scene reference URLs.
+</details>
+
+<details>
+<summary><b>Q: What if my character isn't in assetLists?</b></summary>
+
+Skill describes by name only — no `@` reference. All platform prompts fall back to text. Skill flags `"_no_ref": ["X"]` so you know.
+</details>
+
+<details>
+<summary><b>Q: How strict is `time`? I want exactly 6s — not 5.8.</b></summary>
+
+The skill verifies Σ(shot durations) === `time` exactly. Each shot is ≥ 0.8s and ≤ 5s. If the rhythm can't fit, the skill warns.
+</details>
+
+<details>
+<summary><b>Q: Can I use this without Claude?</b></summary>
+
+The auto-trigger flow needs Claude Code. But `references/` files are usable as a manual prompt-engineering guide — copy micro-expression entries or shot codes directly.
+</details>
+
+<details>
+<summary><b>Q: How do I update?</b></summary>
+
+```bash
+cd ~/.claude/skills/video-prompt-skill && git pull
+```
+</details>
+
+<details>
+<summary><b>Q: Can I add my own platform (e.g. Sora)?</b></summary>
+
+Fork →
+1. Add a section to `references/platform-adaptations.md`
+2. Add the platform ID to the canonical list in `SKILL.md`
+3. Update the output schema with a `<your>Prompt` field
+4. Open a PR
+</details>
+
+<details>
+<summary><b>Q: I have a v3.1 downstream pipeline expecting △[time] and [Image1]. How do I migrate?</b></summary>
+
+v3.2 is a breaking format change. Update your parsers to expect:
+- `sceneDesc` uses `镜头N[start-end s]:`, not `△[time]`
+- `seedancePrompt.prompt` is Chinese 4-section, not `[Image1] + Scene N`
+- `seedancePrompt.references` shape: `{tag, name, file}` (was `{type, file, index}`)
+
+Schema **field names are unchanged** — only the *content* of `sceneDesc` and `seedancePrompt.prompt` changed.
+</details>
+
+<details>
+<summary><b>Q: Does it fetch image URLs to check they exist?</b></summary>
+
+No. URL reachability is downstream — skill just passes URLs through. Use any image host.
+</details>
 
 ---
 
-## Version history
+## 📜 Version history
 
 | Area | v3.0 | v3.1 | **v3.2** |
 |---|---|---|---|
-| Shot count | `N = round(time / 1.5)` | Semantic 4-dimension analysis | Same as v3.1 |
-| Platform selection | Always all five | NL or JSON subset | Same as v3.1 |
-| Skipped platform output | (n/a) | Completely omitted | Same as v3.1 |
+| Shot count | `N = round(time / 1.5)` | Semantic 4-dim | Same as v3.1 |
+| Platform subset | ❌ Always 5 | ✅ NL or JSON | Same as v3.1 |
+| Skipped platform output | — | Completely omitted | Same as v3.1 |
 | Shot format | `△[time]` | `△[time]` | **`镜头N[start-end s]:` strict** |
-| Per-shot dimensions | Free-form | Free-form | **6 required: 景别 / 动作 / 微表情 / 光影 / 运镜 / 音效** |
-| Micro-expressions | Ad-hoc | Ad-hoc | **50-entry library across 10 categories** |
-| Seedance format | English `[Image1]` + `Scene N / lens switch` | Same as v3.0 | **Chinese 4-section + `@图N + 名称` + anti-collapse tail** |
-| Pre-output self-check | Implicit | Implicit | **8-item explicit checklist per row** |
-| Shot library | 40 shots | 60+ shots, A01–I12 | Same as v3.1 |
-| Physics keywords | (n/a) | Kling-specific list | Same as v3.1 |
+| Per-shot dimensions | Free-form | Free-form | **6 required** |
+| Micro-expressions | Ad-hoc | Ad-hoc | **50-entry library** |
+| Seedance format | `[Image1]` English | Same as v3.0 | **Chinese 4-section + `@图N+name`** |
+| Pre-output self-check | Implicit | Implicit | **8-item checklist** |
+| Shot library | 40 | 60+ | Same as v3.1 |
+| Physics keywords | — | Kling-specific | Same as v3.1 |
+
+Release notes: [v3.2.0](https://github.com/liqi21cn/video-prompt-skill/releases/tag/v3.2.0)
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 Issues and PRs welcome.
 
-Good first PR ideas:
-- Add a new shot to `references/shot-library.md` (with code + emotion mapping)
-- Add a new micro-expression to `references/micro-expressions.md` (with scene tag + 5-element description)
-- Document a new platform behavior in `references/platform-adaptations.md`
-- Add a worked example for an edge case
+Good first PRs:
+- Add a new shot to `references/shot-library.md`
+- Add a new micro-expression entry to `references/micro-expressions.md`
 - Translate `references/*.md` to another language
+- Add a recently-discovered platform behavior to `references/platform-adaptations.md`
 
-For substantial changes (new platform support, rhythm algorithm changes, format hardening), open an issue first.
+For substantial changes (new platforms, rhythm algorithm, format constraints), open an issue first.
 
 ---
 
-## License
+## 📄 License
 
 [MIT](LICENSE) — use freely in commercial and personal projects.
 
@@ -679,5 +474,7 @@ For substantial changes (new platform support, rhythm algorithm changes, format 
 <div align="center">
 
 **Found this useful?** ⭐ Star the repo so others can find it.
+
+[Issues](https://github.com/liqi21cn/video-prompt-skill/issues) · [Releases](https://github.com/liqi21cn/video-prompt-skill/releases) · [中文](README.zh-CN.md)
 
 </div>

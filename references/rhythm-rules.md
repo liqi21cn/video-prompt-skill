@@ -79,7 +79,7 @@ Emotion: calm, hesitant
 Dialogue: YES, one full sentence
 Information density: 1 (just the line)
 → Decision: 1-2 long shots
-→ Plan: △[0-3s] speaking shot  △[3-6s] reaction shot
+→ Plan: 镜头1[0-3s]: speaking shot  镜头2[3-6s]: reaction shot
 ```
 
 ### Example 2: Fast combat (6 seconds)
@@ -91,8 +91,8 @@ Emotion: explosive climax
 Dialogue: NONE
 Information density: 5 key points (dodge, regrip, swing, contact, blood mist)
 → Decision: 5-6 dense shots
-→ Plan: △[0-1s] dodge  △[1-1.8s] regrip  △[1.8-2.5s] swing
-        △[2.5-3.2s] contact  △[3.2-4.5s] blood mist  △[4.5-6s] aftermath
+→ Plan: 镜头1[0-1s]: dodge  镜头2[1-1.8s]: regrip  镜头3[1.8-2.5s]: swing
+        镜头4[2.5-3.2s]: contact  镜头5[3.2-4.5s]: blood mist  镜头6[4.5-6s]: aftermath
 ```
 
 ### Example 3: Environmental atmosphere (6 seconds)
@@ -104,7 +104,7 @@ Emotion: atmospheric, lonely
 Dialogue: NONE
 Information density: 2 (rain on stones, lantern in distance)
 → Decision: 2-3 free intercuts
-→ Plan: △[0-2.5s] rain close-up  △[2.5-4s] wide pullback  △[4-6s] lantern detail
+→ Plan: 镜头1[0-2.5s]: rain close-up  镜头2[2.5-4s]: wide pullback  镜头3[4-6s]: lantern detail
 ```
 
 ### Example 4: Inner awakening (6 seconds)
@@ -116,8 +116,8 @@ Emotion: turning point, revelation
 Dialogue: NONE (inner)
 Information density: 2 (the opening, the realization)
 → Decision: slow-quick-freeze rhythm curve
-→ Plan: △[0-2.5s] closed eyes slow breathing  △[2.5-3s] eyes snap open
-        △[3-6s] dilated pupil freeze frame
+→ Plan: 镜头1[0-2.5s]: closed eyes slow breathing  镜头2[2.5-3s]: eyes snap open
+        镜头3[3-6s]: dilated pupil freeze frame
 ```
 
 ### Example 5: System alert + character reaction (3 seconds)
@@ -130,7 +130,7 @@ Emotion: shock, alarm
 Dialogue: system text
 Information density: 2 (UI alert, reaction)
 → Decision: 2 dense shots
-→ Plan: △[0-1.5s] full-screen UI alert with shake  △[1.5-3s] character close-up, dilated pupil
+→ Plan: 镜头1[0-1.5s]: full-screen UI alert with shake  镜头2[1.5-3s]: character close-up, dilated pupil
 ```
 
 ## When to use long single-shots

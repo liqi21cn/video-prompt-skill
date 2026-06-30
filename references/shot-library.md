@@ -4,7 +4,7 @@ The 60+ camera shots organized by category. Each shot has a unique code (A01, B0
 
 ## Selection algorithm
 
-For each △ fragment, pick a shot via this priority cascade:
+For each shot, pick a shot via this priority cascade:
 
 ```
 Step 1  Emotion match → candidate set E

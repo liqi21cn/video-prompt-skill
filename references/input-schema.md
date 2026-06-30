@@ -221,7 +221,7 @@ The character is mentioned but has no visual reference. Output:
 
 ### time = 1 or less
 
-Very short rows. Constraint: single shot only (since min shot is 0.8s). Use a single △ fragment covering the full duration.
+Very short rows. Constraint: single shot only (since min shot is 0.8s). Use a single shot covering the full duration.
 
 ### Multiple characters in one row's originalText
 
@@ -229,7 +229,7 @@ All referenced characters that exist in `assetLists` get their own `@图片N` ma
 
 ```
 originalText: "李雷望着韩梅梅，韩梅梅低头不语"
-→ sceneDesc: "△[0-3s] 教室@图片1，李雷@图片2 望着韩梅梅@图片3..."
+→ sceneDesc: "镜头1[0-3s]: 教室@图片1，李雷@图片2 望着韩梅梅@图片3..."
 → imageRefs: ["李雷", "韩梅梅"]
 ```
 

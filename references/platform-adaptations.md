@@ -4,7 +4,7 @@ The single most important file. Defines how to translate the canonical `sceneDes
 
 ## Conceptual model
 
-Every row produces ONE `sceneDesc` (director-readable Chinese storyboard with `△[time]` anchors and `@图片N` markers), then FIVE platform prompts derived from it.
+Every row produces ONE `sceneDesc` (director-readable Chinese storyboard with `镜头N[start-end s]:` prefixes and `@图片N` markers), then FIVE platform prompts derived from it.
 
 The translation isn't just word-swapping — each platform has its own:
 - Language preference (Chinese vs English)
@@ -53,7 +53,7 @@ Audio: [ambient sounds, dialogue if any].
 ### Translation example
 
 ```
-sceneDesc: △[0-3s]修炼密室@图片1，赵长安@图片2 缓慢盘膝坐下，
+sceneDesc: 镜头1[0-3s]: 修炼密室@图片1，赵长安@图片2 缓慢盘膝坐下，
           脊柱挺直，眼睑缓缓合拢，胸腔随呼吸缓缓起伏
 
 veoPrompt: {
@@ -111,7 +111,7 @@ Note: `@图片2 赵长安` becomes "A young cultivator" in the prompt body, and 
 ### Translation example
 
 ```
-sceneDesc: △[0-2s]近景，赵长安@图片2 紧闭双眼，眉头微微皱起，
+sceneDesc: 镜头1[0-2s]: 近景，赵长安@图片2 紧闭双眼，眉头微微皱起，
           胸腔缓缓起伏
 
 grokPrompt: {
@@ -136,26 +136,65 @@ For a 30-second sequence, generate six 5-second clips, each using the previous c
 
 ## Platform 3: Seedance 2.0
 
-**Origin:** ByteDance. **Released:** February 2026.
+**Origin:** ByteDance (字节系，Volcengine 火山引擎). **Released:** February 2026.
 
-**Language:** Chinese or English — both work well. Chinese slightly preferred (native model).
+**Language:** **Chinese only** (mandated by official Volcengine spec `byted-ark-seedance-pe v1.0`). The model is trained primarily on Chinese corpora; English prompts produce visibly weaker results. Exception: keep original English dialogue as-is.
 
-**Reference syntax:** **`[Image1]` `[Image2]` ... `[Video1]` `[Audio1]`** — square brackets, integer index.
+**Reference syntax:** **`@图N` + immediately following Chinese name** (e.g. `@图1 赵长安`, `@图2 黑衣刺客`). Bare `@图N` without a name is **prohibited** — it causes Chinese tokenizer ambiguity.
 
-**Multi-angle:** No (one image per reference index), but you can use many indices.
+**Multi-angle:** No (one image per `@图N` reference), but you can use many `@图N` indices. Same character with multiple angles becomes `@图1 赵长安正脸` + `@图2 赵长安侧脸`.
 
-**Multi-shot:** **YES.** Use `lens switch` keyword between scenes. Up to 9 images + 3 videos + 3 audio in one prompt.
+**Multi-shot:** **YES — via time slices, not lens switches.** The official structure uses Chinese time annotations like `0-3 秒：...；3-6 秒：...；6-12 秒：...。` within a single prompt. Up to 9 images + 3 videos + 3 audio total assets in one prompt.
 
-### Prompt template
+### Mandatory four-section structure
+
+Every Seedance prompt **must** be organized into these four sections (per official skill):
 
 ```
-Scene 1: [shot with [Image1] [Image2] references],
-[camera move]. Audio: [...].
-lens switch.
-Scene 2: [next shot description].
-lens switch.
-Scene 3: [...]
+[① 全局基础设定段]
+（声明角色/环境/资产 + 建立 @图N 到名称的映射）
+
+[② 时间片分镜脚本]
+0-X 秒：@图N 角色名 在 @图M 场景名 做什么，<微表情>，<光影>，镜头<一种运镜>；
+X-Y 秒：...；
+Y-Z 秒：...。
+
+[③ 音频/台词段]（可选，有对白或显著音效时必含）
+台词：「...」；音效：...；环境音：...。
+
+[④ 画质风格与防崩坏约束段]（强制）
+4K 高清，细节丰富，<风格词>，<色调>，<氛围>；面部稳定不变形、五官清晰、人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁。
 ```
+
+Sections separated by `\n\n` (empty line). The four-section structure is non-negotiable per official spec.
+
+### Hard rules
+
+| # | Rule | Why |
+|---|---|---|
+| 1 | `@图N` must be followed by a Chinese name | Prevents tokenizer parsing ambiguity |
+| 2 | One camera move per time slice | Multi-move per slice degrades motion quality |
+| 3 | No `[Image1]` / `Scene N` / `lens switch` / `[asset-xxx]` | All deprecated forms |
+| 4 | Mandatory quality tail (4K + 7 anti-collapse items) | Without this, Seedance defaults to lower fidelity |
+| 5 | Preserve all dialogue and audio | Cannot silently drop |
+| 6 | Time format `0-1.5 秒` (Chinese 秒 + space) | Not `0-1.5s`, not `0~1.5秒` |
+| 7 | Use `；` between slices, `。` at end | Punctuation matters for parsing |
+
+### Translation from `sceneDesc` to Seedance
+
+Each `镜头N[start-end s]: <description>` becomes one time slice:
+
+```
+镜头1[0-1.5s]: 中景，赵长安@图片2 缓慢盘膝坐下，眉心微皱呼吸放缓，烛火暖光从右侧打亮面部，缓慢推入聚焦面部，环境音衣料摩擦声
+    ↓
+0-1.5 秒：@图1 赵长安在@图3 修炼密室中缓慢盘膝坐下，眉心微皱呼吸放缓，烛火暖光从右侧打亮面部，镜头缓慢推入聚焦面部；
+```
+
+Notice:
+- `镜头1[0-1.5s]:` → `0-1.5 秒：` (Chinese unit + space)
+- `@图片2` → `@图1 赵长安` (Seedance uses its own numbering + name anchor)
+- `@图片1` (scene) → `@图3 修炼密室` (scene typically becomes last `@图N`)
+- The audio dimension can be moved to the dedicated 音频段 OR kept in-slice — both are valid
 
 ### Key strengths
 
@@ -170,42 +209,62 @@ Scene 3: [...]
 - Not as photorealistic as Veo for static product shots
 - Background drift in long takes
 - Lip-sync less precise than HappyHorse
+- **Strict format compliance required** — deviating from the four-section structure noticeably degrades output
 
-### Translation example
-
-Single Scene:
+### Translation example — single time slice
 
 ```
-sceneDesc: △[0-3s]修炼密室@图片1，赵长安@图片2 盘膝而坐
+sceneDesc: 镜头1[0-3s]: 中景，赵长安@图片2 在 修炼密室@图片1 中盘膝而坐，
+                       眉心松开呼吸悠长，烛火暖光从两侧低位打亮，
+                       缓慢推入聚焦面部，灵气流动的低频嗡鸣
 
 seedancePrompt: {
-  "prompt": "Cinematic close-up. The character from [Image1] sits
-             cross-legged in the stone chamber from [Image2], golden
-             energy gathering, slow dolly-in, candlelight ambience.
-             Audio: meditative breathing, subtle wind chimes.",
+  "prompt": "@图1 赵长安身着玄色道袍剑眉星目，@图2 修炼密室幽暗石室壁刻满符文。
+
+0-3 秒：@图1 赵长安在@图2 修炼密室中央盘膝而坐，眉心松开呼吸悠长嘴角带极浅平静，烛火暖光从两侧低位打亮面部，镜头缓慢推入聚焦面部。
+
+音效：灵气流动的低频嗡鸣、衣料摩擦细响、远处隐约的洞穴回声。
+
+4K 高清，细节丰富，国风修仙写实风格，暖金色调，烛光氛围沉静神秘；面部稳定不变形、五官清晰、人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁。",
   "references": [
-    {"type": "image", "file": "zhao_front.jpg", "index": 1},
-    {"type": "image", "file": "chamber.jpg", "index": 2}
+    {"tag": "@图1", "name": "赵长安", "file": "zhao_front.jpg"},
+    {"tag": "@图2", "name": "修炼密室", "file": "chamber.jpg"}
   ]
 }
 ```
 
-Multi-Scene (4 shots in one generation):
+### Translation example — multi time slice (4 shots in one generation)
 
 ```
 seedancePrompt: {
-  "prompt": "Scene 1: Wide shot of [Image2], the character from
-             [Image1] barely visible. lens switch.
-             Scene 2: Medium shot pushing in. lens switch.
-             Scene 3: Close-up of face. lens switch.
-             Scene 4: Extreme close-up of glowing dantian.
-             Audio: building meditative tone.",
+  "prompt": "@图1 赵长安身着玄色道袍，@图2 修炼密室幽暗石室壁刻满符文。
+
+0-2 秒：远景@图2 修炼密室全貌，@图1 赵长安在中央几乎不可见，烛火微光闪烁，镜头静止远景观察；
+2-4 秒：中景，@图1 赵长安进入画面盘膝而坐，呼吸放缓眉心松开，烛火暖光打亮面部轮廓，镜头缓慢推入；
+4-6 秒：近景，@图1 赵长安面部细节，眉心松开嘴角带极浅平静，烛火在瞳孔反射出温暖光点，镜头继续推入；
+6-8 秒：极近特写，@图1 赵长安丹田位置浮现金色灵气，灵气如潮水般涌入身体，金光在肌肤上流动，镜头微距聚焦丹田。
+
+音效：低频嗡鸣由弱到强、衣料摩擦细响、灵气流动的清亮共鸣。
+
+4K 高清，细节丰富，国风修仙写实风格，暖金色调与符文蓝光交织，沉静神秘的渐入式氛围；面部稳定不变形、五官清晰、人体结构正常、动作自然流畅、不僵硬、画面无卡顿、无闪烁。",
   "references": [
-    {"type": "image", "file": "zhao_front.jpg", "index": 1},
-    {"type": "image", "file": "chamber.jpg", "index": 2}
+    {"tag": "@图1", "name": "赵长安", "file": "zhao_front.jpg"},
+    {"tag": "@图2", "name": "修炼密室", "file": "chamber.jpg"}
   ]
 }
 ```
+
+Notice the **渐入式** flow: 远景 → 中景 → 近景 → 极近特写, each in its own time slice with one camera move. This is the canonical Seedance pattern.
+
+### Common mistakes to avoid
+
+- ❌ Writing in English: `Scene 1: A young man sits...`
+- ❌ Bare reference: `@图1 sits cross-legged...` (missing name after `@图1`)
+- ❌ Multi-camera per slice: `0-2 秒：...镜头推入再拉远...`
+- ❌ Missing quality tail: ends with the time slices, no `4K 高清`
+- ❌ Incomplete anti-collapse: only 3-4 of the 7 items
+- ❌ Using `lens switch` to separate scenes: this is deprecated
+- ❌ Asset IDs in description: `Scene 2: [asset-zhao-changan] enters...`
 
 ---
 
@@ -264,7 +323,7 @@ Plus, in the API payload:
 ### Translation example
 
 ```
-sceneDesc: △[0-3s]近景，赵长安@图片2 紧闭双眼，眉头微皱，
+sceneDesc: 镜头1[0-3s]: 近景，赵长安@图片2 紧闭双眼，眉头微皱，
           胸腔缓缓起伏
 
 happyhorsePrompt: {
@@ -368,7 +427,7 @@ This triggers Kling's lip-sync system. Use `说道：「...」` rather than just
 ### Translation example
 
 ```
-sceneDesc: △[0-3s]修炼密室@图片1，赵长安@图片2 盘膝而坐，
+sceneDesc: 镜头1[0-3s]: 修炼密室@图片1，赵长安@图片2 盘膝而坐，
           脊柱挺直，眼睑缓缓合拢
 
 klingPrompt: {
@@ -411,15 +470,14 @@ When you have `@图片N 实体名` in `sceneDesc`, translate to:
 |---|---|---|
 | Veo | "the character" (no marker) | `reference_images: [url]` |
 | Grok | `@image1` | `image_urls: [url]` |
-| Seedance | `[Image1]` | `references: [{type, file, index}]` |
+| Seedance | `@图1 角色名` (Chinese, name required) | `references: [{tag, name, file}]` |
 | HappyHorse | `@name_in_pinyin` | `elements: [{name, desc, element_input_urls: [4 urls]}]` |
 | Kling | `@中文名` | `elements: [{name, desc, element_input_urls: [4 urls]}]` |
 
 ## Language assignment quick rule
 
 - **English-only**: Veo, Grok, HappyHorse
-- **Chinese-only**: Kling
-- **Either**: Seedance (prefer Chinese for Chinese-language drama)
+- **Chinese-only**: Kling, **Seedance** (字节系产品，官方规范强制中文)
 
 ## When a platform should be skipped
 
